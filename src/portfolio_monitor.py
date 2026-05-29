@@ -68,13 +68,6 @@ class PortfolioMonitor:
                     'peak_nav': float(latest_nav),
                     'status': 'holding',
                 }
-                    'fund_code': code,
-                    'fund_name': name,
-                    'entry_date': fund.get('entry_date', today_str),
-                    'entry_nav': float(entry_nav),
-                    'peak_nav': float(latest_nav),
-                    'status': 'holding',
-                }
 
             record = tracking[track_id]
             entry_nav = record['entry_nav']
