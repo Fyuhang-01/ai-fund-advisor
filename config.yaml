@@ -1,0 +1,77 @@
+# AI Fund Advisor Configuration
+# 所有敏感信息请替换为你自己的值
+
+# ── DingTalk Notification ──
+dingtalk:
+  # 钉钉自定义机器人 Webhook URL（必填）
+  # 获取方式：钉钉桌面版 → 群设置 → 智能群助手 → 添加机器人 → 自定义
+  webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=YOUR_TOKEN_HERE"
+  # 通知签名密钥（若机器人设置了加签）
+  secret: ""
+
+# ── Data Sources ──
+data:
+  # 数据源优先级: akshare, tushare, baostock
+  preferred_source: "akshare"
+  # 离线模式：仅使用本地缓存，不联网
+  offline: false
+  # 缓存有效期（天），过期后联网更新
+  cache_ttl_days: 1
+  # 数据存储路径
+  raw_dir: "data/raw"
+  outbox_dir: "data/outbox"
+
+# ── Fund Analysis ──
+analysis:
+  # 关注的板块基金（场内ETF代码，可自行增删）
+  sector_etfs:
+    technology: ["515050", "159995", "588000"]    # 科技、芯片、科创
+    consumer:   ["159928", "512690", "515650"]    # 消费、食品饮料
+    healthcare: ["512010", "159883", "512170"]    # 医药、医疗器械
+    new_energy: ["516160", "159806", "515030"]    # 新能源、光伏、新能源车
+    finance:    ["512880", "512800", "510230"]    # 证券、银行、金融
+    military:   ["512660", "512670"]              # 军工
+    agriculture: ["159825", "159865"]             # 农业
+    broad:      ["510300", "510500", "159915"]    # 沪深300、中证500、创业板
+
+# ── Recommendation Rules ──
+recommend:
+  # 推荐基金数量
+  top_n: 5
+  # 持有天数
+  hold_days: 9
+  # 排除条件
+  exclude:
+    min_scale_yi: 1.0      # 规模 < 1亿 排除
+    min_age_years: 1       # 成立 < 1年 排除
+    max_daily_vol: 0.05    # 日波动 > 5% 排除
+
+# ── Redemption Timing ──
+redemption:
+  # 止盈线
+  take_profit_pct: 0.04      # +4% 止盈
+  # 回撤止损线（从最高点算）
+  trailing_stop_pct: 0.025   # 从高点回撤 2.5% 止损
+  # 到期审视
+  expiry_days: 9             # 持有满9天且亏损则提醒
+  # 技术指标参数
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  rsi_period: 14
+  rsi_overbought: 70
+  rsi_oversold: 30
+
+# ── Scheduling ──
+schedule:
+  # 每周一推荐
+  weekly_recommend_time: "09:00"
+  # 每日赎回检查（交易日）
+  daily_check_time: "14:30"
+  # 盘中高频检查间隔（分钟），0 表示不启用
+  intraday_check_minutes: 0
+
+# ── Backtest ──
+backtest:
+  lookback_days: 90          # 回测看过去90天
+  risk_free_rate: 0.03       # 无风险利率（3%）

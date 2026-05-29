@@ -1,0 +1,8 @@
+data/raw/*.parquet
+data/raw/*.json
+data/outbox/*.json
+data/outbox/*.txt
+__pycache__/
+*.pyc
+.venv/
+.env
