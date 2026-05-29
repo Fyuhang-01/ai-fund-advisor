@@ -70,12 +70,23 @@ class PortfolioMonitor:
                 }
 
             record = tracking[track_id]
+
+            # Always sync amount from config (in case user updates it)
+            config_amount = fund.get('amount', 0)
+            if config_amount > 0 and record.get('amount', 0) != config_amount:
+                record['amount'] = float(config_amount)
+
             entry_nav = record['entry_nav']
             amount = record.get('amount', 0)
             shares = record.get('shares', 0)
 
-            # Recalculate shares if missing
-            if shares == 0 and entry_nav > 0:
+            # Recalculate shares if amount changed or missing
+            if amount > 0 and entry_nav > 0:
+                new_shares = amount / entry_nav
+                if abs(shares - new_shares) > 0.01:
+                    shares = new_shares
+                    record['shares'] = float(shares)
+            if shares == 0 and entry_nav > 0 and amount > 0:
                 shares = amount / entry_nav
                 record['shares'] = float(shares)
 
