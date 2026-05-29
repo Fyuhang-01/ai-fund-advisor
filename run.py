@@ -84,12 +84,12 @@ def cmd_portfolio(config: dict):
     monitor = PortfolioMonitor(config, fetcher)
     notifier = Notifier(config)
 
-    # Generate and print daily summary
+    # Check for signals (also initializes tracking)
+    signals = monitor.check_all()
+
+    # Generate and print daily summary (after check so tracking is populated)
     summary = monitor.daily_summary()
     print(summary)
-
-    # Check for signals
-    signals = monitor.check_all()
     if signals:
         print(f"\n触发 {len(signals)} 个信号:")
         for sig in signals:

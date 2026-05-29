@@ -2,18 +2,37 @@ name: Fund Monitor
 
 on:
   schedule:
-    # 每周一 09:00 北京时间 = 01:00 UTC
-    - cron: '0 1 * * 1'
-    # 每天 14:30 北京时间 = 06:30 UTC
-    - cron: '30 6 * * 1-5'
+    - cron: '0 1 * * 1'         # 每周一 09:00 北京时间
+    - cron: '30 6 * * 1-5'      # 每交易日 14:30 北京时间
   workflow_dispatch:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   portfolio-check:
     runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && (
+        contains(github.event.issue.title, '持仓') ||
+        contains(github.event.issue.title, '日报') ||
+        contains(github.event.issue.title, '推荐') ||
+        contains(github.event.issue.title, '基金')
+      )) ||
+      (github.event_name == 'issue_comment' && (
+        contains(github.event.comment.body, '/持仓') ||
+        contains(github.event.comment.body, '/日报') ||
+        contains(github.event.comment.body, '/推荐') ||
+        contains(github.event.comment.body, '/监控') ||
+        contains(github.event.comment.body, '/信号')
+      ))
     steps:
       - uses: actions/checkout@v4
 
@@ -24,9 +43,30 @@ jobs:
       - name: Install dependencies
         run: pip install numpy pandas scipy matplotlib akshare requests schedule pyyaml
 
-      - name: Run portfolio check
+      - name: Determine command
+        id: cmd
         run: |
-          MPLBACKEND=Agg python run.py --portfolio > output.txt 2>&1 || {
+          BODY=""
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            BODY="${{ github.event.comment.body }}"
+          elif [[ "${{ github.event_name }}" == "issues" ]]; then
+            BODY="${{ github.event.issue.title }}"
+          else
+            BODY=""
+          fi
+          echo "BODY=$BODY"
+
+          if echo "$BODY" | grep -qE '/推荐'; then
+            echo "SCRIPT=--recommend" >> $GITHUB_OUTPUT
+            echo "LABEL=📊 本周推荐" >> $GITHUB_OUTPUT
+          else
+            echo "SCRIPT=--portfolio" >> $GITHUB_OUTPUT
+            echo "LABEL=📋 持仓监测" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run analysis
+        run: |
+          MPLBACKEND=Agg python run.py ${{ steps.cmd.outputs.SCRIPT }} > output.txt 2>&1 || {
             echo "Script failed, using fallback..."
             python -c "
           import akshare as ak
@@ -36,8 +76,9 @@ jobs:
               try:
                   df = ak.fund_open_fund_info_em(symbol=c, indicator='单位净值走势')
                   if df is not None and len(df) > 0:
+                      cols = list(df.columns)
                       latest = df.iloc[-1]
-                      print(f'{n}: 净值 {latest[\"单位净值\"]} 日期 {latest[\"日期\"]}')
+                      print(f'{n}: 净值 {latest[cols[1]]} 日期 {latest[cols[0]]}')
               except Exception as e:
                   print(f'{n}: fetch failed - {e}')
           " > output.txt 2>&1
@@ -53,50 +94,67 @@ jobs:
             const webhook = process.env.DINGTALK_WEBHOOK;
             const secret = process.env.DINGTALK_SECRET;
 
-            if (!webhook) {
-              console.log('DINGTALK_WEBHOOK not set, skipping notification');
-              return;
-            }
-
-            // Build URL with signature if secret provided
-            let url = webhook;
-            if (secret) {
-              const crypto = require('crypto');
-              const timestamp = Date.now().toString();
-              const stringToSign = timestamp + '\n' + secret;
-              const sign = crypto.createHmac('sha256', secret).update(stringToSign).digest('base64');
-              url = webhook + '&timestamp=' + timestamp + '&sign=' + encodeURIComponent(sign);
-            }
-
-            const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-            const body = {
-              msgtype: 'markdown',
-              markdown: {
-                title: '📋 持仓监测 — ' + now,
-                text: '## 📋 持仓监测 — ' + now + ' UTC\n\n```\n' + output + '\n```\n\n---\n> 每日自动监测 · GitHub Actions'
+            if (webhook && webhook.length > 10) {
+              let url = webhook;
+              if (secret && secret.length > 5) {
+                const crypto = require('crypto');
+                const timestamp = Date.now().toString();
+                const stringToSign = timestamp + '\n' + secret;
+                const sign = crypto.createHmac('sha256', secret).update(stringToSign).digest('base64');
+                url = webhook + '&timestamp=' + timestamp + '&sign=' + encodeURIComponent(sign);
               }
-            };
 
-            const https = require('https');
-            const { URL } = require('url');
-            const parsedUrl = new URL(url);
-            const data = JSON.stringify(body);
-
-            await new Promise((resolve, reject) => {
-              const req = https.request({
-                hostname: parsedUrl.hostname,
-                path: parsedUrl.pathname + parsedUrl.search,
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-              }, res => {
-                let b = '';
-                res.on('data', d => b += d);
-                res.on('end', () => { console.log('DingTalk:', b); resolve(); });
+              const https = require('https');
+              const { URL } = require('url');
+              const parsedUrl = new URL(url);
+              const data = JSON.stringify({
+                msgtype: 'markdown',
+                markdown: {
+                  title: '📋 持仓监测',
+                  text: '## 📋 持仓监测\n\n```\n' + output.substring(0, 15000) + '\n```'
+                }
               });
-              req.on('error', reject);
-              req.write(data);
-              req.end();
-            });
+
+              await new Promise((resolve, reject) => {
+                const req = https.request({
+                  hostname: parsedUrl.hostname,
+                  path: parsedUrl.pathname + parsedUrl.search,
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' }
+                }, res => { let b=''; res.on('data',d=>b+=d); res.on('end',()=>{console.log('DingTalk:',b); resolve();}); });
+                req.on('error', reject);
+                req.write(data);
+                req.end();
+              });
+            }
+
+      - name: Post result as comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('output.txt', 'utf8').substring(0, 20000);
+
+            const label = '${{ steps.cmd.outputs.LABEL }}';
+            const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+
+            const body = '## ' + label + '  -  ' + now + ' UTC\n\n```\n' + output + '\n```\n\n---\n> 回复 `/持仓` `/推荐` 获取更新';
+
+            let issueNumber;
+            if (context.eventName === 'issues') {
+              issueNumber = context.payload.issue.number;
+            } else if (context.eventName === 'issue_comment') {
+              issueNumber = context.payload.issue.number;
+            }
+
+            if (issueNumber) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: body
+              });
+            }
         env:
           DINGTALK_WEBHOOK: ${{ secrets.DINGTALK_WEBHOOK }}
           DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
