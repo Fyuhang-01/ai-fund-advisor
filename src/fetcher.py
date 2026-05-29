@@ -54,9 +54,45 @@ class DataFetcher:
 
     # ── ETF / Fund NAV ──
 
+    def _etf_code_to_sina(self, code: str) -> str:
+        """Convert ETF code to Sina symbol: 510300 -> sh510300, 159915 -> sz159915"""
+        if code.startswith(('sh', 'sz')):
+            return code
+        if code.startswith(('5', '6', '9')):
+            return f"sh{code}"
+        return f"sz{code}"
+
+    def _normalize_etf_df(self, df: pd.DataFrame, source: str) -> pd.DataFrame:
+        """Normalize ETF dataframe to standard columns regardless of source"""
+        if source == 'sina':
+            cn_map = {'date': 'date', 'open': 'open', 'high': 'high',
+                      'low': 'low', 'close': 'close', 'volume': 'volume'}
+            for cn, en in [('日期', 'date'), ('开盘', 'open'), ('最高', 'high'),
+                           ('最低', 'low'), ('收盘', 'close'), ('成交量', 'volume')]:
+                if cn in df.columns:
+                    df = df.rename(columns={cn: en})
+        elif source == 'em':
+            cn_map = {'日期': 'date', '开盘': 'open', '最高': 'high',
+                     '最低': 'low', '收盘': 'close', '成交量': 'volume',
+                     '成交额': 'amount', '涨跌幅': 'pct_change'}
+            df = df.rename(columns={k: v for k, v in cn_map.items() if k in df.columns})
+
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.set_index('date')
+        df.index = pd.to_datetime(df.index)
+        df.index.name = 'date'
+        df = df.sort_index()
+        if 'close' not in df.columns:
+            for c in ['收盘', 'close']:
+                if c in df.columns:
+                    df['close'] = df[c]
+                    break
+        return df
+
     def fetch_etf_history(self, code: str, start: str = '2020-01-01',
                           force_update: bool = False) -> Optional[pd.DataFrame]:
-        """获取单只ETF的历史日线数据（前复权）"""
+        """获取单只ETF的历史日线数据（新浪优先，东方财富备用）"""
         cache_key = f"etf_hist_{code}"
         if not force_update:
             cached = self._read_cache(cache_key)
@@ -66,28 +102,38 @@ class DataFetcher:
         if self.offline:
             return self._read_cache(cache_key)
 
+        import akshare as ak
+        end_date = datetime.now().strftime('%Y%m%d')
+
+        # Strategy 1: Sina (works better inside China)
         try:
-            import akshare as ak
-            end_date = datetime.now().strftime('%Y%m%d')
+            sina_code = self._etf_code_to_sina(code)
+            df = ak.fund_etf_hist_sina(symbol=sina_code)
+            if df is not None and len(df) > 10:
+                df = self._normalize_etf_df(df, 'sina')
+                df = df[df.index >= start]
+                self._write_cache(cache_key, df)
+                return df
+        except Exception:
+            pass
+
+        # Strategy 2: East Money (fallback)
+        try:
             df = ak.fund_etf_hist_em(
                 symbol=code, period='daily',
                 start_date=start.replace('-', ''),
                 end_date=end_date, adjust='qfq'
             )
-            if df is None or len(df) == 0:
-                return None
-            df = df.rename(columns={
-                '日期': 'date', '开盘': 'open', '最高': 'high',
-                '最低': 'low', '收盘': 'close', '成交量': 'volume',
-                '成交额': 'amount', '涨跌幅': 'pct_change'
-            })
-            df['date'] = pd.to_datetime(df['date'])
-            df = df.set_index('date').sort_index()
-            self._write_cache(cache_key, df)
-            return df
-        except Exception as e:
-            print(f"  [WARN] ETF {code} fetch failed: {e}")
-            return self._read_cache(cache_key)  # fallback to stale cache
+            if df is not None and len(df) > 10:
+                df = self._normalize_etf_df(df, 'em')
+                self._write_cache(cache_key, df)
+                return df
+        except Exception:
+            pass
+
+        # Strategy 3: Stale cache
+        print(f"  [WARN] ETF {code} fetch failed (all sources)")
+        return self._read_cache(cache_key)
 
     def fetch_etf_batch(self, codes: List[str], start: str = '2020-01-01',
                         force_update: bool = False) -> pd.DataFrame:
