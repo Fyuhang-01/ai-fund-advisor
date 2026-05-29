@@ -7,6 +7,7 @@ Usage:
   python run.py                    # 启动定时任务（每周推荐 + 每日赎回检查）
   python run.py --recommend        # 手动触发一次周度推荐
   python run.py --check            # 手动触发一次赎回检查
+  python run.py --portfolio        # 检查你的持仓基金，发送钉钉日报
   python run.py --status           # 查看当前持仓跟踪状态
   python run.py --update           # 联网更新数据
   python run.py --offline          # 离线模式（仅使用本地缓存）
@@ -26,6 +27,7 @@ from src.recommender import WeeklyRecommender
 from src.timing import RedemptionTracker
 from src.notifier import Notifier
 from src.scheduler import TaskScheduler
+from src.portfolio_monitor import PortfolioMonitor
 
 
 def load_config(offline: bool = False) -> dict:
@@ -74,6 +76,45 @@ def cmd_check(config: dict):
 
     # Show status
     print(tracker.status_summary())
+
+
+def cmd_portfolio(config: dict):
+    """检查用户持仓基金"""
+    fetcher = DataFetcher(config)
+    monitor = PortfolioMonitor(config, fetcher)
+    notifier = Notifier(config)
+
+    # Generate and print daily summary
+    summary = monitor.daily_summary()
+    print(summary)
+
+    # Check for signals
+    signals = monitor.check_all()
+    if signals:
+        print(f"\n触发 {len(signals)} 个信号:")
+        for sig in signals:
+            print(f"  [{sig['type']}] {sig['fund_name']} — {sig['message'].split(chr(10))[0]}")
+            # Send DingTalk alert
+            content = (
+                f"## {sig['icon']} 持仓信号\n\n"
+                f"{sig['message']}\n\n"
+                f"---\n"
+                f"- 持仓天数: {sig['days_held']}天\n"
+                f"- 累计收益: {sig['total_return']:.2%}\n"
+                f"- 当前净值: {sig['latest_nav']:.4f}\n"
+                f"- 数据日期: {sig['nav_date']}\n"
+                f"- 检测时间: {sig['timestamp']}\n"
+            )
+            notifier.send_dingtalk(
+                f"{sig['icon']} {sig['fund_name']}",
+                content
+            )
+        notifier.flush_queue()
+    else:
+        print("\n所有持仓正常，无触发信号")
+        # Send daily summary regardless
+        notifier.send_dingtalk("📋 持仓日报", summary)
+        notifier.flush_queue()
 
 
 def cmd_status(config: dict):
@@ -160,6 +201,7 @@ Examples:
         '''
     )
     parser.add_argument('--recommend', action='store_true', help='手动触发周度推荐')
+    parser.add_argument('--portfolio', action='store_true', help='检查持仓基金并发送日报')
     parser.add_argument('--check', action='store_true', help='手动检查赎回信号')
     parser.add_argument('--status', action='store_true', help='查看持仓跟踪状态')
     parser.add_argument('--update', action='store_true', help='联网更新数据缓存')
@@ -171,6 +213,8 @@ Examples:
 
     if args.recommend:
         cmd_recommend(config)
+    elif args.portfolio:
+        cmd_portfolio(config)
     elif args.check:
         cmd_check(config)
     elif args.status:

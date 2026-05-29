@@ -71,6 +71,28 @@ schedule:
   # 盘中高频检查间隔（分钟），0 表示不启用
   intraday_check_minutes: 0
 
+# ── User Portfolio (你的持仓) ──
+portfolio:
+  funds:
+    - code: "026200"
+      name: "大摩港通多元成长混合C"
+      entry_date: "2026-05-29"
+      entry_nav: null       # 可填入场净值，不填自动取今日净值
+      take_profit_pct: 0.04
+      stop_loss_pct: 0.025
+    - code: "023452"
+      name: "中欧信息科技混合发起C"
+      entry_date: "2026-05-29"
+      entry_nav: null
+      take_profit_pct: 0.04
+      stop_loss_pct: 0.025
+    - code: "014320"
+      name: "德邦半导体产业混合发起式C"
+      entry_date: "2026-05-29"
+      entry_nav: null
+      take_profit_pct: 0.04
+      stop_loss_pct: 0.025
+
 # ── Backtest ──
 backtest:
   lookback_days: 90          # 回测看过去90天

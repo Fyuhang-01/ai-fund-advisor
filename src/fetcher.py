@@ -180,29 +180,47 @@ class DataFetcher:
         return {'code': code, 'name': code, 'price': 0}
 
     def fetch_fund_nav(self, code: str, start: str = '2020-01-01') -> Optional[pd.DataFrame]:
-        """获取场外基金历史净值走势"""
+        """获取场外基金历史净值走势（支持多种数据源）"""
         cache_key = f"fund_nav_{code}"
-        if not self.offline:
-            cached = self._read_cache(cache_key)
-            if cached is not None and len(cached) > 10 and self._cache_valid(self._cache_path(cache_key)):
-                return cached
+        cached = self._read_cache(cache_key)
+        if cached is not None and len(cached) > 10 and self._cache_valid(self._cache_path(cache_key)):
+            return cached
 
         if self.offline:
             return self._read_cache(cache_key)
 
+        import akshare as ak
+        df = None
+
+        # Strategy 1: East Money fund info (most reliable for mutual funds)
         try:
-            import akshare as ak
             df = ak.fund_open_fund_info_em(symbol=code, indicator='单位净值走势')
-            if df is None or len(df) == 0:
-                return None
-            df = df.rename(columns={'日期': 'date', '单位净值': 'nav'})
-            df['date'] = pd.to_datetime(df['date'])
-            df = df.set_index('date').sort_index()
-            self._write_cache(cache_key, df)
-            return df
-        except Exception as e:
-            print(f"  [WARN] Fund NAV {code} fetch failed: {e}")
+            if df is not None and len(df) > 0:
+                df = df.rename(columns={'日期': 'date', '单位净值': 'nav'})
+        except Exception:
+            pass
+
+        # Strategy 2: Fund daily NAV snapshot
+        if df is None:
+            try:
+                daily = ak.fund_open_fund_daily_em()
+                row = daily[daily['基金代码'] == code]
+                if len(row) > 0:
+                    r = row.iloc[0]
+                    nav = float(r.get('单位净值', r.get('累计净值', 0)))
+                    today = datetime.now().strftime('%Y-%m-%d')
+                    df = pd.DataFrame({'date': [today], 'nav': [nav]})
+            except Exception:
+                pass
+
+        if df is None or len(df) == 0:
             return self._read_cache(cache_key)
+
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.set_index('date').sort_index()
+        df = df[df.index >= start]
+        self._write_cache(cache_key, df)
+        return df
 
     # ── Fund Holdings ──
 
