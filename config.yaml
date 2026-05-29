@@ -76,18 +76,21 @@ portfolio:
   funds:
     - code: "026200"
       name: "大摩港通多元成长混合C"
+      amount: 7601.39
       entry_date: "2026-05-29"
-      entry_nav: null       # 可填入场净值，不填自动取今日净值
+      entry_nav: null
       take_profit_pct: 0.04
       stop_loss_pct: 0.025
     - code: "023452"
       name: "中欧信息科技混合发起C"
+      amount: 1874.30
       entry_date: "2026-05-29"
       entry_nav: null
       take_profit_pct: 0.04
       stop_loss_pct: 0.025
     - code: "014320"
       name: "德邦半导体产业混合发起式C"
+      amount: 1014.69
       entry_date: "2026-05-29"
       entry_nav: null
       take_profit_pct: 0.04

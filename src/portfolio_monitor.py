@@ -39,6 +39,7 @@ class PortfolioMonitor:
         for fund in self.portfolio:
             code = fund['code']
             name = fund['name']
+            amount = fund.get('amount', 0)
 
             # Get latest NAV
             nav_df = self.fetcher.fetch_fund_nav(code, start='2025-01-01')
@@ -50,13 +51,23 @@ class PortfolioMonitor:
             latest_nav = float(nav_series.iloc[-1])
             nav_date = str(nav_series.index[-1].date())
 
-            # Initialize tracking if new
+            # Calculate shares held = amount / entry_nav
             track_id = f"holding_{code}"
             if track_id not in tracking:
                 entry_nav = fund.get('entry_nav')
                 if entry_nav is None:
                     entry_nav = latest_nav
+                shares = amount / float(entry_nav) if float(entry_nav) > 0 else 0
                 tracking[track_id] = {
+                    'fund_code': code,
+                    'fund_name': name,
+                    'amount': float(amount),
+                    'entry_date': fund.get('entry_date', today_str),
+                    'entry_nav': float(entry_nav),
+                    'shares': float(shares),
+                    'peak_nav': float(latest_nav),
+                    'status': 'holding',
+                }
                     'fund_code': code,
                     'fund_name': name,
                     'entry_date': fund.get('entry_date', today_str),
@@ -67,14 +78,27 @@ class PortfolioMonitor:
 
             record = tracking[track_id]
             entry_nav = record['entry_nav']
+            amount = record.get('amount', 0)
+            shares = record.get('shares', 0)
+
+            # Recalculate shares if missing
+            if shares == 0 and entry_nav > 0:
+                shares = amount / entry_nav
+                record['shares'] = float(shares)
+
+            # Current value and P&L
+            current_value = shares * latest_nav
+            total_profit = current_value - amount
+            total_return = (latest_nav - entry_nav) / entry_nav
 
             # Update peak
             if latest_nav > record.get('peak_nav', entry_nav):
                 record['peak_nav'] = latest_nav
 
             peak_nav = record['peak_nav']
-            total_return = (latest_nav - entry_nav) / entry_nav
+            peak_value = shares * peak_nav
             drawdown_from_peak = (peak_nav - latest_nav) / peak_nav if peak_nav > 0 else 0
+            profit_from_peak = current_value - peak_value
             days_held = (datetime.now().date() -
                         pd.Timestamp(record['entry_date']).date()).days
 
@@ -97,8 +121,9 @@ class PortfolioMonitor:
                     'priority': 1,
                     'icon': '🟢',
                     'message': (f'{name}({code})\n'
-                               f'累计收益 **{total_return:.2%}**，已达止盈线(+{take_profit:.0%})\n'
-                               f'建议立即赎回，锁定利润'),
+                               f'累计收益 **{total_return:.2%}**'
+                               f'（+{total_profit:+.2f}元），已达止盈线(+{take_profit:.0%})\n'
+                               f'当前市值 {current_value:.2f}元\n建议立即赎回'),
                 }
 
             # Rule 2: Trailing stop
@@ -108,8 +133,10 @@ class PortfolioMonitor:
                     'priority': 2,
                     'icon': '🟡',
                     'message': (f'{name}({code})\n'
-                               f'从高点回撤 **{drawdown_from_peak:.2%}**'
-                               f'，触发移动止损\n建议赎回保护利润'),
+                               f'从最高市值 {peak_value:.2f}元 回撤 **{drawdown_from_peak:.2%}**'
+                               f'（{profit_from_peak:+.2f}元）\n'
+                               f'当前市值 {current_value:.2f}元\n'
+                               f'触发移动止损，建议赎回'),
                 }
 
             # Rule 3: MACD death cross
@@ -120,6 +147,8 @@ class PortfolioMonitor:
                     'icon': '🔵',
                     'message': (f'{name}({code})\n'
                                f'MACD死叉，RSI从高位回落({rsi:.0f})\n'
+                               f'当前市值 {current_value:.2f}元'
+                               f'（{total_profit:+.2f}元）\n'
                                f'短期可能回调，可考虑减仓'),
                 }
 
@@ -131,13 +160,15 @@ class PortfolioMonitor:
                     'icon': '🟠',
                     'message': (f'{name}({code})\n'
                                f'RSI超买({rsi:.0f})，短期回调风险高\n'
+                               f'当前市值 {current_value:.2f}元'
+                               f'（{total_profit:+.2f}元）\n'
                                f'可考虑部分止盈'),
                 }
 
             # No signal — healthy
             else:
                 print(f"  ✓ {name}({code}) 持有{days_held}天 "
-                      f"收益{total_return:.2%} 正常")
+                      f"收益{total_return:.2%}（{total_profit:+.2f}元）正常")
 
             # Record signal
             sent_key = f"{code}:{signal['type'] if signal else 'ok'}"
@@ -184,13 +215,17 @@ class PortfolioMonitor:
         if not tracking:
             return '暂无持仓数据'
 
+        total_amount = 0
+        total_value = 0
         lines = [f"## 📋 持仓日报 — {datetime.now().strftime('%Y-%m-%d')}\n"]
-        lines.append("| 基金 | 持有天数 | 累计收益 | 距高回撤 | RSI | 状态 |")
-        lines.append("|------|---------|---------|---------|-----|------|")
+        lines.append("| 基金 | 投入 | 市值 | 盈亏 | 占比 | RSI | 状态 |")
+        lines.append("|------|------|------|------|------|-----|------|")
 
         for track_id, record in tracking.items():
             code = record['fund_code']
             name = record['fund_name']
+            amount = record.get('amount', 0)
+            shares = record.get('shares', 0)
 
             nav_df = self.fetcher.fetch_fund_nav(code, start='2025-01-01')
             if nav_df is None or len(nav_df) < 5:
@@ -200,11 +235,19 @@ class PortfolioMonitor:
             latest_nav = float(nav.iloc[-1])
             entry_nav = record['entry_nav']
             peak_nav = record.get('peak_nav', entry_nav)
+
+            if shares == 0 and entry_nav > 0:
+                shares = amount / entry_nav
+            current_value = shares * latest_nav
+            profit = current_value - amount
             total_ret = (latest_nav - entry_nav) / entry_nav
             dd_peak = (peak_nav - latest_nav) / peak_nav if peak_nav > 0 else 0
             days = (datetime.now().date() -
                    pd.Timestamp(record['entry_date']).date()).days
             rsi = FundAnalyzer.compute_rsi(nav)
+
+            total_amount += amount
+            total_value += current_value
 
             # Status
             if total_ret >= self.red_cfg.get('take_profit_pct', 0.04):
@@ -218,7 +261,13 @@ class PortfolioMonitor:
             else:
                 status = '✅ 正常'
 
-            lines.append(f"| {name[:8]} | {days}天 | {total_ret:+.2%} "
-                        f"| {dd_peak:.2%} | {rsi:.0f} | {status} |")
+            lines.append(f"| {name[:8]} | {amount:.0f} | {current_value:.0f} "
+                        f"| {profit:+.0f} | {total_ret:+.2%} | {rsi:.0f} | {status} |")
+
+        # Total row
+        if total_amount > 0:
+            total_profit = total_value - total_amount
+            lines.append(f"| **合计** | **{total_amount:.0f}** | **{total_value:.0f}** "
+                        f"| **{total_profit:+.0f}** | **{total_profit/total_amount:+.2%}** | | |")
 
         return '\n'.join(lines)
