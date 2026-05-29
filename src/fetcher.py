@@ -180,10 +180,10 @@ class DataFetcher:
         return {'code': code, 'name': code, 'price': 0}
 
     def fetch_fund_nav(self, code: str, start: str = '2020-01-01') -> Optional[pd.DataFrame]:
-        """获取场外基金历史净值走势（支持多种数据源）"""
+        """获取场外基金历史净值走势"""
         cache_key = f"fund_nav_{code}"
         cached = self._read_cache(cache_key)
-        if cached is not None and len(cached) > 10 and self._cache_valid(self._cache_path(cache_key)):
+        if cached is not None and len(cached) > 5 and self._cache_valid(self._cache_path(cache_key)):
             return cached
 
         if self.offline:
@@ -192,35 +192,44 @@ class DataFetcher:
         import akshare as ak
         df = None
 
-        # Strategy 1: East Money fund info (most reliable for mutual funds)
         try:
-            df = ak.fund_open_fund_info_em(symbol=code, indicator='单位净值走势')
-            if df is not None and len(df) > 0:
-                df = df.rename(columns={'日期': 'date', '单位净值': 'nav'})
-        except Exception:
-            pass
+            raw = ak.fund_open_fund_info_em(symbol=code, indicator='单位净值走势')
+            if raw is not None and len(raw) > 0:
+                # The DataFrame has 3 cols: 净值日期, 单位净值, 日增长率
+                # Map by position (more robust than Chinese column name matching)
+                cols = list(raw.columns)
+                df = raw.copy()
+                # Column 0 = date, Column 1 = nav
+                date_col = cols[0]
+                nav_col = cols[1] if len(cols) > 1 else cols[0]
+                df = df.rename(columns={date_col: 'date', nav_col: 'nav'})
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        except Exception as e:
+            print(f"  [WARN] Fund NAV {code} Strategy 1 failed: {e}")
 
-        # Strategy 2: Fund daily NAV snapshot
-        if df is None:
+        if df is None or 'date' not in df.columns:
             try:
                 daily = ak.fund_open_fund_daily_em()
                 row = daily[daily['基金代码'] == code]
                 if len(row) > 0:
                     r = row.iloc[0]
-                    nav = float(r.get('单位净值', r.get('累计净值', 0)))
+                    nav = float(r.get('单位净值', 0))
                     today = datetime.now().strftime('%Y-%m-%d')
                     df = pd.DataFrame({'date': [today], 'nav': [nav]})
+                    df['date'] = pd.to_datetime(df['date'])
             except Exception:
                 pass
 
-        if df is None or len(df) == 0:
+        if df is None or len(df) < 2:
             return self._read_cache(cache_key)
 
-        df['date'] = pd.to_datetime(df['date'])
+        df = df.dropna(subset=['date', 'nav'])
         df = df.set_index('date').sort_index()
         df = df[df.index >= start]
-        self._write_cache(cache_key, df)
-        return df
+        if len(df) > 0:
+            self._write_cache(cache_key, df)
+        return df if len(df) > 0 else self._read_cache(cache_key)
 
     # ── Fund Holdings ──
 
