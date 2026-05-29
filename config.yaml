@@ -5,9 +5,9 @@
 dingtalk:
   # 钉钉自定义机器人 Webhook URL（必填）
   # 获取方式：钉钉桌面版 → 群设置 → 智能群助手 → 添加机器人 → 自定义
-  webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=YOUR_TOKEN_HERE"
+  webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=0aebb8bf3948acd43b91375906e8ca49b8f60a19a11b6cb45400c02f3444d61d"
   # 通知签名密钥（若机器人设置了加签）
-  secret: ""
+  secret: "SEC5d05b4d0b6a7cd7710769e8c03ecf65be78a8efe2b0e3fd05d4f7d3b095d404d"
 
 # ── Data Sources ──
 data:

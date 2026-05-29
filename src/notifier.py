@@ -1,12 +1,16 @@
 """
 DingTalk Notifier — 钉钉通知模块
-支持：钉钉机器人 Webhook / 离线队列 / 桌面弹窗（Windows/macOS）
+支持：钉钉机器人 Webhook（含加签） / 离线队列 / 桌面弹窗（Windows/macOS）
 """
 import os
 import json
 import time
+import hmac
+import hashlib
+import base64
 import platform
 import requests
+from urllib.parse import quote_plus
 from typing import Dict, List, Optional
 from datetime import datetime
 
@@ -24,14 +28,26 @@ class Notifier:
 
     # ── DingTalk Webhook ──
 
+    def _sign_url(self) -> str:
+        """为钉钉 Webhook URL 加签"""
+        if not self.secret:
+            return self.webhook_url
+        timestamp = str(round(time.time() * 1000))
+        string_to_sign = f"{timestamp}\n{self.secret}"
+        sign = base64.b64encode(
+            hmac.new(self.secret.encode(), string_to_sign.encode(), hashlib.sha256).digest()
+        ).decode()
+        return f"{self.webhook_url}&timestamp={timestamp}&sign={quote_plus(sign)}"
+
     def send_dingtalk(self, title: str, content: str,
                       msg_type: str = 'markdown') -> bool:
-        """通过钉钉机器人发送 Markdown 消息"""
+        """通过钉钉机器人发送 Markdown 消息（支持加签）"""
         if not self.webhook_url or 'YOUR_TOKEN' in self.webhook_url:
             print("  [WARN] 钉钉 Webhook 未配置，跳过发送")
             self._queue_notification(title, content)
             return False
 
+        signed_url = self._sign_url()
         payload = {
             'msgtype': msg_type,
             msg_type: {
@@ -42,7 +58,7 @@ class Notifier:
 
         try:
             resp = requests.post(
-                self.webhook_url,
+                signed_url,
                 json=payload,
                 headers={'Content-Type': 'application/json'},
                 timeout=10
