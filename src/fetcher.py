@@ -105,19 +105,7 @@ class DataFetcher:
         import akshare as ak
         end_date = datetime.now().strftime('%Y%m%d')
 
-        # Strategy 1: Sina (works better inside China)
-        try:
-            sina_code = self._etf_code_to_sina(code)
-            df = ak.fund_etf_hist_sina(symbol=sina_code)
-            if df is not None and len(df) > 10:
-                df = self._normalize_etf_df(df, 'sina')
-                df = df[df.index >= start]
-                self._write_cache(cache_key, df)
-                return df
-        except Exception:
-            pass
-
-        # Strategy 2: East Money (fallback)
+        # Strategy 1: East Money (works globally, including GitHub Actions US runners)
         try:
             df = ak.fund_etf_hist_em(
                 symbol=code, period='daily',
@@ -126,6 +114,18 @@ class DataFetcher:
             )
             if df is not None and len(df) > 10:
                 df = self._normalize_etf_df(df, 'em')
+                self._write_cache(cache_key, df)
+                return df
+        except Exception:
+            pass
+
+        # Strategy 2: Sina (works from inside China, fallback)
+        try:
+            sina_code = self._etf_code_to_sina(code)
+            df = ak.fund_etf_hist_sina(symbol=sina_code)
+            if df is not None and len(df) > 10:
+                df = self._normalize_etf_df(df, 'sina')
+                df = df[df.index >= start]
                 self._write_cache(cache_key, df)
                 return df
         except Exception:
